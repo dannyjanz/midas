@@ -69,7 +69,6 @@ class CandlesAPI:
             step * sec_interval)).format('HHmmss')) for step in steps]
         signals = [signal.reindex(new_index).fillna(
             method='backfill') for signal in signals]
-        signals = signals[1:]
         return signals
 
     def load_day(self, instrument, day, granularity, price):
