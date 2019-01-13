@@ -83,6 +83,7 @@ class CandlesAPI:
             raw_day = self.store[day_key]
             return raw_day
 
+    # TODO fix this
     def resample(self, signals):
         [signal for signal in signals if len(signal) > 128]
         sec_interval = 30
