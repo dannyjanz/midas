@@ -45,7 +45,6 @@ class Episode:
         # should reward maybe only unrealiyed pl?
         reward = self.account.realized_pl + self.account.unrealized_pl
         self.done = self.account.current_balance <= 0 or self.length - self.current_step == 0  # day / week is over or money is out
-        print("next frame")
         return (next_frame, reward, self.done)
 
     def buy(self):
@@ -64,31 +63,32 @@ class Episode:
 class Order:
     def __init__(self, order_type, market_info):
         self.close_price_function = {
-            1: lambda frame: frame['ask_close'],
-            -1: lambda frame: frame['bid_close']
+            1: lambda frame: frame['ask_close'].values[0],
+            -1: lambda frame: frame['bid_close'].values[0]
         }
         self.close_price = self.close_price_function[order_type]
         self.order_type = order_type
-        self.order_price = self.close_price(market_info).values[0]
+        self.order_price = self.close_price(market_info)
         self.initial_spread = market_info['ask_close'].values[0] - market_info['bid_close'].values[0]
-        self.order_volume = 10000
-        self.stop_loss = 0.00005
-        self.take_profit = 0.00015  # 1.5pips?
+        self.order_volume = 2000
+        self.stop_loss = 0.0005
+        self.take_profit = 0.0015
         self.profit_loss = self.calculate_pl(market_info)
         print("order")
 
     def calculate_pl(self, market_info):
-        return ((self.close_price(market_info) - self.order_price) * self.order_volume) * self.order_type
+        return (((self.close_price(market_info) - self.order_price) *
+                self.order_volume) * self.order_type) - self.initial_spread * self.order_volume
 
     def update(self, market_info):
         # TODO consider TP and SL
-        self.profit_loss = self.calculate_pl(market_info) - self.initial_spread
-        diff = self.close_price[self.order_type](market_info) - self.order_price  # consider order type
+        self.profit_loss = self.calculate_pl(market_info)
+        diff = self.close_price(market_info) - self.order_price  # consider order type
         if diff >= self.take_profit:  # TODO this is quite dirty, cap at the actual sl and tp & also consider high and low
             print("katsching!")
             return (self.profit_loss, True)
         elif -diff >= self.stop_loss:
-            print("zonk!")
+            print("zonk!!!" + str(diff))
             return (self.profit_loss, True)
         else:
             print("...")
