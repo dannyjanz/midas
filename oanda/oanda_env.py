@@ -1,5 +1,6 @@
 import arrow as time
 
+
 class OandaEnv:
     def __init__(self, api):
         self.api = api
@@ -13,9 +14,7 @@ class OandaEnv:
 
         days = self.api.load_period('EUR_USD', start, end)
 
-        self.episodes = [
-            episode for episode in days if len(episode) > 128]
-
+        self.episodes = [episode for episode in days if len(episode) > 128]
 
     def next_episode(self):
         return Episode(self.episodes[1])
@@ -25,11 +24,7 @@ class Episode:
     def __init__(self, trading_day):
         print("new episode")
         self.actions = [0, 1, -1]
-        self.action_functions = {
-            1: self.buy,
-            0: self.hold,
-            -1: self.sell
-        }
+        self.action_functions = {1: self.buy, 0: self.hold, -1: self.sell}
         self.window_size = 32
         self.current_step = 0
         self.trading_day = trading_day
@@ -44,13 +39,12 @@ class Episode:
         self.action_functions[action]()
         self.current_step += 1
         # TODO distinguish between raw frame for account usage and preprocessed frame for agent use
-        next_frame = self.trading_day[self.current_step:
-                                      self.window_size + self.current_step]
+        next_frame = self.trading_day[self.current_step:self.window_size +
+                                      self.current_step]
         self.current_frame = next_frame
         # should reward maybe only unrealiyed pl?
         reward = self.account.realized_pl + self.account.unrealized_pl
-        self.done = self.account.current_balance <= 0 or self.length - \
-            self.current_step == 0  # day / week is over or money is out
+        self.done = self.account.current_balance <= 0 or self.length - self.current_step == 0  # day / week is over or money is out
         print("next frame")
         return (next_frame, reward, self.done)
 
@@ -69,9 +63,14 @@ class Episode:
 
 class Order:
     def __init__(self, order_type, market_info):
+        self.close_price_function = {
+            1: lambda frame: frame['ask_close'],
+            -1: lambda frame: frame['bid_close']
+        }
+        self.close_price = self.close_price_function[order_type]
         self.order_type = order_type
-        # does the order type matter? fucking yes
-        self.order_price = market_info['ask_close'].values[0]
+        self.order_price = self.close_price(market_info).values[0]
+        self.initial_spread = market_info['ask_close'].values[0] - market_info['bid_close'].values[0]
         self.order_volume = 10000
         self.stop_loss = 0.00005
         self.take_profit = 0.00015  # 1.5pips?
@@ -79,15 +78,13 @@ class Order:
         print("order")
 
     def calculate_pl(self, market_info):
-        # TODO is that right? or is the bid ask thingy reversed for a sell order?
-        return ((market_info['bid'].values[0] - self.order_price) * self.order_volume) * self.order_type
+        return ((self.close_price(market_info) - self.order_price) * self.order_volume) * self.order_type
 
     def update(self, market_info):
         # TODO consider TP and SL
-        self.profit_loss = self.calculate_pl(market_info)
-        diff = market_info['bid'].values[0] - \
-            self.order_price  # consider order type
-        if diff >= self.take_profit:  # todo this is quite dirty, cap at the actual sl and tp
+        self.profit_loss = self.calculate_pl(market_info) - self.initial_spread
+        diff = self.close_price[self.order_type](market_info) - self.order_price  # consider order type
+        if diff >= self.take_profit:  # TODO this is quite dirty, cap at the actual sl and tp & also consider high and low
             print("katsching!")
             return (self.profit_loss, True)
         elif -diff >= self.stop_loss:
@@ -109,10 +106,10 @@ class Account:
         print("account")
 
     def place_order(self, market_info, order_type):
-        if self.current_order == None:
+        if self.current_order is None:
             self.current_order = Order(order_type, market_info)
             self.unrealized_pl = self.current_order.profit_loss
-        elif self.current_order != None and self.current_order.order_type == -order_type:
+        elif self.current_order is not None and self.current_order.order_type == -order_type:
             self.current_order.update(market_info)
             self.realized_pl += self.current_order.profit_loss
             self.unrealized_pl = 0
@@ -134,6 +131,7 @@ class Account:
 
 
 # ==========================================================================
+
 
 def ema_crossings(emas):
     crossings = []
@@ -160,14 +158,18 @@ def calc_chunks(data, crossings, pre_window):
     for i in range(len(data)):
         if crossings[i] == -1:
             if last_cross == 1:
-                chunks.append(Trade(
-                    data[last_cross_index:i], 1, data[last_cross_index - pre_window:last_cross_index]))
+                chunks.append(
+                    Trade(
+                        data[last_cross_index:i], 1,
+                        data[last_cross_index - pre_window:last_cross_index]))
             last_cross = -1
             last_cross_index = i
         elif crossings[i] == 1:
             if last_cross == -1:
-                chunks.append(Trade(
-                    data[last_cross_index:i], -1, data[last_cross_index - pre_window:last_cross_index]))
+                chunks.append(
+                    Trade(
+                        data[last_cross_index:i], -1,
+                        data[last_cross_index - pre_window:last_cross_index]))
             last_cross = 1
             last_cross_index = i
     return chunks
@@ -182,19 +184,20 @@ class Trade():
         self.trade_type = trade_type
         self.pretrade = pretrade
 
-        self.open_price = frame['ask_close'].values[0] if trade_type == 1 else frame['bid_close'].values[0]
-        self.close_price = frame['ask_close'].values[-1] if trade_type == 1 else frame['bid_close'].values[-1]
-        self.diff = ((self.close_price - self.open_price)
-                     * trade_type) * self.volume
-        self.initial_spread = frame['ask_close'].values[0] - \
-            frame['bid_close'].values[0]
-        self.best = frame['bid_close'].max(
-        ) if trade_type == 1 else frame['ask_close'].min()
+        self.open_price = frame['ask_close'].values[
+            0] if trade_type == 1 else frame['bid_close'].values[0]
+        self.close_price = frame['ask_close'].values[
+            -1] if trade_type == 1 else frame['bid_close'].values[-1]
+        self.diff = (
+            (self.close_price - self.open_price) * trade_type) * self.volume
+        self.initial_spread = frame['ask_close'].values[0] - frame['bid_close'].values[0]
+        self.best = frame['bid_close'].max() if trade_type == 1 else frame[
+            'ask_close'].min()
         self.best_index = frame['bid_close'].idxmax(
         ) if trade_type == 1 else frame['ask_close'].idxmin()
         self.best_diff = abs(self.open_price - self.best)
-        self.worst = frame['bid_close'].min(
-        ) if trade_type == 1 else frame['ask_close'].max()
+        self.worst = frame['bid_close'].min() if trade_type == 1 else frame[
+            'ask_close'].max()
         self.worst_index = frame['bid_close'].idxmin(
         ) if trade_type == 1 else frame['ask_close'].idxmax()
         self.worst_diff = abs(self.open_price - self.worst)
@@ -244,7 +247,7 @@ class Trade():
 
     def summary(self, plot_frame=False):
         print('-----------------------------------------------------')
-        print('buy' if self.trade_type == 1 else 'sell')
+        print('buy' if self.trade_type == 1 else 'sssell')
         print('exit reason: ' + self.exit_reason)
         print('realized: ' + str(self.realized))
         print('diff: ' + str(self.diff))
