@@ -2,8 +2,10 @@ import arrow as time
 
 
 class OandaEnv:
-    def __init__(self, api):
+    def __init__(self, api, window_size=32):
         self.api = api
+        self.window_size = window_size
+        self.dimensions = 8
         self.episodes = []
         self.raw_days = []
         print("test")
@@ -17,15 +19,21 @@ class OandaEnv:
         self.episodes = [episode for episode in days if len(episode) > 128]
 
     def next_episode(self):
-        return Episode(self.episodes[1])
+        return Episode(self.episodes[1], self.window_size)
+
+    def state_shape(self):
+        return (self.window_size, self.dimensions)
+
+    def action_dims(self):
+        return 3
 
 
 class Episode:
-    def __init__(self, trading_day):
+    def __init__(self, trading_day, win_size):
         print("new episode")
         self.actions = [0, 1, -1]
         self.action_functions = {1: self.buy, 0: self.hold, -1: self.sell}
-        self.window_size = 32
+        self.window_size = win_size
         self.current_step = 0
         self.trading_day = trading_day
         self.current_frame = trading_day[:self.window_size]
