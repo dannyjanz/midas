@@ -1,14 +1,28 @@
 import arrow as time
 
 
+class DefaultRewardPolicy:
+    def __init__(self):
+        pass
+    
+    def calc_reward(self, realized, unrealized):
+        reward = 0
+        
+        if realized + unrealized > 0:
+            reward = 1
+        elif realized + unrealized < 0:
+            reward = -1
+        
+        return reward
+
 class OandaEnv:
-    def __init__(self, api, window_size=32):
+    def __init__(self, api, window_size=32, reward_policy=DefaultRewardPolicy()):
         self.api = api
         self.window_size = window_size
         self.dimensions = 8
         self.episodes = []
         self.raw_days = []
-        print("test")
+        self.reward_policy = reward_policy
 
     def initialize(self):
         start = time.get("2018-01-02T00:00:00Z", 'YYYY-MM-DDTHH:mm:ss')
@@ -19,7 +33,7 @@ class OandaEnv:
         self.episodes = [episode for episode in days if len(episode) > 128]
 
     def next_episode(self):
-        return Episode(self.episodes[1], self.window_size)
+        return Episode(self.episodes[1], self.window_size, self.reward_policy)
 
     def state_shape(self):
         return (self.window_size, self.dimensions)
@@ -29,7 +43,7 @@ class OandaEnv:
 
 
 class Episode:
-    def __init__(self, trading_day, win_size):
+    def __init__(self, trading_day, win_size, reward_policy):
         print("new episode")
         self.actions = [0, 1, -1]
         self.action_functions = {1: self.buy, 0: self.hold, -1: self.sell}
@@ -40,6 +54,7 @@ class Episode:
         self.account = Account(1000, 20)
         self.length = trading_day.shape[0] - self.window_size
         self.done = False
+        self.reward_policy = reward_policy
 
     def step(self, action):
         assert action in self.actions
@@ -51,21 +66,21 @@ class Episode:
                                       self.current_step]
         self.current_frame = next_frame
         # should reward maybe only unrealiyed pl?
-        reward = self.account.realized_pl + self.account.unrealized_pl
+        reward = self.reward_policy.calc_reward(self.account.realized_pl, self.account.unrealized_pl) # I need a better reward strategy, like positive PL = 1 negative pl = -1
         self.done = self.account.current_balance <= 0 or self.length - self.current_step == 0  # day / week is over or money is out
         return (next_frame, reward, self.done)
 
     def buy(self):
         self.account.place_order(self.current_frame.tail(1), 1)
-        print("buying!")
+        # print("buying!")
 
     def sell(self):
         self.account.place_order(self.current_frame.tail(1), -1)
-        print("selling!")
+        # print("selling!")
 
     def hold(self):
         self.account.update(self.current_frame.tail(1))
-        print("waiting..")
+        # print("waiting..")
 
 
 class Order:
@@ -93,13 +108,13 @@ class Order:
         self.profit_loss = self.calculate_pl(market_info)
         diff = self.close_price(market_info) - self.order_price  # consider order type
         if diff >= self.take_profit:  # TODO this is quite dirty, cap at the actual sl and tp & also consider high and low
-            print("katsching!")
+            # print("katsching!")
             return (self.profit_loss, True)
         elif -diff >= self.stop_loss:
-            print("zonk!!!" + str(diff))
+            # print("zonk!!!" + str(diff))
             return (self.profit_loss, True)
         else:
-            print("...")
+            # print("...")
             return (self.profit_loss, False)
 
 
