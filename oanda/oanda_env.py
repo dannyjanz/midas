@@ -5,12 +5,13 @@ class DefaultRewardPolicy:
     def __init__(self):
         pass
     
-    def calc_reward(self, realized, unrealized):
+    def calc_reward(self, account):
         reward = 0
+        pl_sum = account.realized_pl + account.unrealized_pl
         
-        if realized + unrealized > 0:
+        if pl_sum > 0:
             reward = 1
-        elif realized + unrealized < 0:
+        elif pl_sum <= 0:
             reward = -1
         
         return reward
@@ -66,7 +67,7 @@ class Episode:
                                       self.current_step]
         self.current_frame = next_frame
         # should reward maybe only unrealiyed pl?
-        reward = self.reward_policy.calc_reward(self.account.realized_pl, self.account.unrealized_pl) # I need a better reward strategy, like positive PL = 1 negative pl = -1
+        reward = self.reward_policy.calc_reward(self.account) # I need a better reward strategy, like positive PL = 1 negative pl = -1
         self.done = self.account.current_balance <= 0 or self.length - self.current_step == 0  # day / week is over or money is out
         return (next_frame, reward, self.done)
 
