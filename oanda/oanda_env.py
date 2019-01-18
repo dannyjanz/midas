@@ -17,13 +17,14 @@ class DefaultRewardPolicy:
         return reward
 
 class OandaEnv:
-    def __init__(self, api, window_size=32, reward_policy=DefaultRewardPolicy()):
+    def __init__(self, api, window_size=32, reward_policy=DefaultRewardPolicy(), verbose=False):
         self.api = api
         self.window_size = window_size
         self.dimensions = 8
         self.episodes = []
         self.raw_days = []
         self.reward_policy = reward_policy
+        self.episode_index = 0
 
     def initialize(self):
         start = time.get("2018-01-02T00:00:00Z", 'YYYY-MM-DDTHH:mm:ss')
@@ -34,7 +35,14 @@ class OandaEnv:
         self.episodes = [episode for episode in days if len(episode) > 128]
 
     def next_episode(self):
-        return Episode(self.episodes[1], self.window_size, self.reward_policy)
+        episode = Episode(self.episodes[self.episode_index], self.window_size, self.reward_policy)
+        
+        if self.episode_index < len(self.episodes) -1: 
+            self.episode_index += 1
+        else: 
+            self.episode_index = 0
+            
+        return episode
 
     def state_shape(self):
         return (self.window_size, self.dimensions)
@@ -98,7 +106,7 @@ class Order:
         self.stop_loss = 0.0005
         self.take_profit = 0.0015
         self.profit_loss = self.calculate_pl(market_info)
-        print("order")
+        #print("order")
 
     def calculate_pl(self, market_info):
         return (((self.close_price(market_info) - self.order_price) *
@@ -127,7 +135,7 @@ class Account:
         self.unrealized_pl = 0
         self.current_order = None
         # consider margin
-        print("account")
+        # print("account")
 
     def place_order(self, market_info, order_type):
         if self.current_order is None:
@@ -139,7 +147,7 @@ class Account:
             self.unrealized_pl = 0
             self.current_balance += self.current_order.profit_loss
             self.current_order = None
-            print("sold existing order")
+            # print("sold existing order")
         else:
             self.update(market_info)
 
