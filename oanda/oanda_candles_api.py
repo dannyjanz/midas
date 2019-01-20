@@ -12,7 +12,7 @@ class CandlesAPI:
         self.inst_base_url = 'https://api-fxpractice.oanda.com/v3/instruments/'
 
     # TODO fix the timing for this
-    def load_period(self, instrument, start, end):
+    def load_period(self, instrument, granularity, start, end):
         time_range = time.Arrow.range('day', start, end)
 
         trading_days = [
@@ -23,7 +23,7 @@ class CandlesAPI:
         for i in range(len(trading_days)):
             day = trading_days[i]
             print(day)
-            values = self.load(day, instrument, "S30")
+            values = self.load(day, instrument, granularity)
             signals.append(values)
         return signals
 
@@ -34,8 +34,7 @@ class CandlesAPI:
             if granularity == 'M5':
                 values = self.load_day(day, instrument, granularity, "BA")
             elif granularity == 'S5' or granularity == 'S30':
-                values = self.load_day_by_hour(day, instrument, granularity,
-                                               "BA")
+                values = self.load_day_by_hour(day, instrument, granularity, "BA")
 
             day_ask_close = pd.Series([
                 float(candle['ask']['c']) for candle in values

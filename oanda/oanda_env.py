@@ -16,6 +16,44 @@ class DefaultRewardPolicy:
         
         return reward
 
+    
+class RealizedPLRewards:
+    def __init__(self):
+        pass
+
+    def calc_reward(self, account):
+        return account.realized_pl
+
+
+class UnRealizedPLRewards:
+    def __init__(self):
+        pass
+
+    def calc_reward(self, account):
+        return account.unrealized_pl
+
+
+class PLSumRewards:
+    def __init__(self):
+        pass
+
+    def calc_reward(self, account):
+        return account.unrealized_pl + account.realized_pl
+
+
+class FinishedTradeRewards:
+    def __init__(self):
+        self.order_last_turn = None
+
+    def calc_reward(self, account):
+        reward = 0
+        if self.order_last_turn is not None and account.current_order is None:
+            reward = self.order_last_turn.profit_loss
+
+        self.order_last_turn = account.current_order
+        return reward 
+
+
 class OandaEnv:
     def __init__(self, api, window_size=32, reward_policy=DefaultRewardPolicy(), verbose=False):
         self.api = api
@@ -26,22 +64,20 @@ class OandaEnv:
         self.reward_policy = reward_policy
         self.episode_index = 0
 
-    def initialize(self):
-        start = time.get("2018-01-02T00:00:00Z", 'YYYY-MM-DDTHH:mm:ss')
-        end = time.get("2018-02-02T00:00:00Z", 'YYYY-MM-DDTHH:mm:ss')
+    def initialize(self, instrument='EUR_USD', granularity='M5', start=time.get("2018-01-02T00:00:00Z", 'YYYY-MM-DDTHH:mm:ss'), end=time.get("2018-02-02T00:00:00Z", 'YYYY-MM-DDTHH:mm:ss')):
 
-        days = self.api.load_period('EUR_USD', start, end)
+        days = self.api.load_period(instrument, granularity, start, end)
 
         self.episodes = [episode for episode in days if len(episode) > 128]
 
     def next_episode(self):
         episode = Episode(self.episodes[self.episode_index], self.window_size, self.reward_policy)
-        
+
         if self.episode_index < len(self.episodes) -1: 
             self.episode_index += 1
-        else: 
+        else:
             self.episode_index = 0
-            
+
         return episode
 
     def state_shape(self):
