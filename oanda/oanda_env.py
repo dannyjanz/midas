@@ -1,4 +1,7 @@
 import arrow as time
+import numpy as np
+import pandas as pd
+from collections import deque
 
 
 class DefaultRewardPolicy:
@@ -100,20 +103,40 @@ class Episode:
         self.length = trading_day.shape[0] - self.window_size
         self.done = False
         self.reward_policy = reward_policy
+        
+        self.recent_actions = deque(np.zeros(win_size), win_size)
+        self.recent_orders = deque(np.zeros(win_size), win_size)
+        self.recent_upl = deque(np.zeros(win_size), win_size)
+        self.recent_pl = deque(np.zeros(win_size), win_size)
 
     def step(self, action):
         assert action in self.actions
         assert not self.done
+        
         self.action_functions[action]()
         self.current_step += 1
-        # TODO distinguish between raw frame for account usage and preprocessed frame for agent use
+        
+        self.recent_actions.append(action) #is this even advisable? 
+        self.recent_orders.append(0 if self.account.current_order is None else self.account.current_order.order_type)
+        self.recent_upl.append(self.account.unrealized_pl)
+        self.recent_pl.append(self.account.realized_pl)
+
         next_frame = self.trading_day[self.current_step:self.window_size +
                                       self.current_step]
+
         self.current_frame = next_frame
-        # should reward maybe only unrealiyed pl?
+        
+        agent_frame = pd.concat([
+            next_frame,
+            pd.Series(list(self.recent_actions), index=next_frame.index).rename('actions'),
+            pd.Series(list(self.recent_orders), index=next_frame.index).rename('orders'),
+            pd.Series(list(self.recent_upl), index=next_frame.index).rename('unrealized'),
+            pd.Series(list(self.recent_pl), index=next_frame.index).rename('realized'),
+        ], axis=1)
+
         reward = self.reward_policy.calc_reward(self.account) # I need a better reward strategy, like positive PL = 1 negative pl = -1
         self.done = self.account.current_balance <= 0 or self.length - self.current_step == 0  # day / week is over or money is out
-        return (next_frame, reward, self.done)
+        return (agent_frame, reward, self.done)
 
     def buy(self):
         self.account.place_order(self.current_frame.tail(1), 1)
