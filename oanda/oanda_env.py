@@ -1,7 +1,9 @@
 import arrow as time
 import numpy as np
 import pandas as pd
+from sklearn.preprocessing import MinMaxScaler
 from collections import deque
+import ta
 
 
 class DefaultRewardPolicy:
@@ -54,11 +56,34 @@ class FinishedTradeRewards:
             reward = self.order_last_turn.profit_loss
 
         self.order_last_turn = account.current_order
+        return reward
+        
+class FinishedTradeAccountBalance:
+    def __init__(self):
+        self.order_last_turn = None
+
+    def calc_reward(self, account):
+        reward = 0
+        if self.order_last_turn is not None and account.current_order is None:
+            reward = account.current_balance
+
+        self.order_last_turn = account.current_order
         return reward 
 
 
+class Same:
+    def __init__(self, episodes):
+        self.episodes = episodes
+
+    def next_episode(self):
+        pass
+
+
 class OandaEnv:
-    def __init__(self, api, window_size=32, reward_policy=DefaultRewardPolicy(), verbose=False):
+    def __init__(self, api, window_size=32,
+                 reward_policy=FinishedTradeAccountBalance(),
+                 episode_policy=Same, verbose=False):
+
         self.api = api
         self.window_size = window_size
         self.dimensions = 8
@@ -219,3 +244,55 @@ class Account:
                 self.current_order = None
             else:
                 self.unrealized_pl = profit_loss
+
+
+
+def process_day(day):
+    # --------------  Calculating Features ------------------
+    high = (day['ask_high'] + day['bid_high']) / 2
+    high = high.rename('high')
+    low = (day['ask_low'] + day['bid_low']) / 2
+    low = low.rename('low')
+    close = (day['ask_close'] + day['bid_close']) / 2
+    close = close.rename('close')
+
+    day_diff = day.diff().rename(columns = {
+        'ask_open': 'ask_open_diff',
+        'bid_open': 'bid_open_diff',
+        'ask_high': 'ask_high_diff',
+        'bid_high': 'bid_high_diff',
+        'ask_low': 'ask_low_diff',
+        'bid_low': 'bid_low_diff',
+        'ask_close': 'ask_close_diff',
+        'bid_close': 'bid_close_diff'
+    })
+
+    ao = ta.momentum.ao(high, low, s=13, l=35, fillna=False).rename('ao')
+    rsi = ta.momentum.rsi(close, n=13, fillna=False).rename('rsi')
+    atr = ta.volatility.average_true_range(high, low, close, n=13, fillna=False).rename('atr')
+    ema13 = ta.trend.ema_indicator(close, n=13, fillna=False).rename('ema13')
+    ema35 = ta.trend.ema_indicator(close, n=35, fillna=False).rename('ema35')
+    all_data = pd.concat([day, day_diff, ao, rsi, atr, ema13.diff(), ema35.diff()], axis=1)
+    enhanced_days.append(all_data)
+  
+    # -------------- Preprocessing -------------------------
+    aligned_data = all_data.dropna()
+    internal_frame = aligned_data[['ask_high', 'bid_high',
+                                   'ask_low', 'bid_low',
+                                   'ask_close', 'bid_close']].copy()
+
+    day_scaler = MinMaxScaler(feature_range=(-1, 1))
+    scaled_day = day_scaler.fit_transform(aligned_data[['ask_close','bid_close','ask_high','bid_high','ask_low','bid_low','ema13','ema35']].astype('float64'))
+    #state = state.reshape((1, 32, 12))
+  
+    ao_scaler = MinMaxScaler(feature_range=(-1, 1))
+    scaled_ao = ao_scaler.fit_transform(aligned_data['ao'].values.reshape(-1,1).astype('float64'))
+  
+    rsi_scaler = MinMaxScaler(feature_range=(-1, 1))
+    scaled_rsi = rsi_scaler.fit_transform(aligned_data['rsi'].values.reshape(-1,1).astype('float64'))
+
+    atr_scaler = MinMaxScaler(feature_range=(-1, 1))
+    scaled_atr = atr_scaler.fit_transform(aligned_data['atr'].values.reshape(-1,1).astype('float64'))
+
+    external_frame = np.concatenate((scaled_day, scaled_ao, scaled_rsi, scaled_atr), axis=1)
+    return internal_frame, external_frame
