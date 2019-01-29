@@ -58,6 +58,7 @@ class FinishedTradeRewards:
         self.order_last_turn = account.current_order
         return reward
         
+
 class FinishedTradeAccountBalance:
     def __init__(self):
         self.order_last_turn = None
@@ -96,7 +97,7 @@ class OandaEnv:
 
         days = self.api.load_period(instrument, granularity, start, end)
 
-        self.episodes = [episode for episode in days if len(episode) > 128]
+        self.episodes = [calculate_features(episode) for episode in days]
 
     def next_episode(self):
         episode = Episode(self.episodes[self.episode_index], self.window_size, self.reward_policy)
@@ -116,16 +117,16 @@ class OandaEnv:
 
 
 class Episode:
-    def __init__(self, trading_day, win_size, reward_policy):
+    def __init__(self, trading_data, win_size, reward_policy):
         print("new episode")
         self.actions = [0, 1, -1]
         self.action_functions = {1: self.buy, 0: self.hold, -1: self.sell}
         self.window_size = win_size
         self.current_step = 0
-        self.trading_day = trading_day
-        self.current_frame = trading_day[:self.window_size]
+        self.trading_day = trading_data
+        self.current_frame = self.trading_day[:self.window_size]
         self.account = Account(1000, 20)
-        self.length = trading_day.shape[0] - self.window_size
+        self.length = self.trading_day.shape[0] - self.window_size
         self.done = False
         self.reward_policy = reward_policy
         
@@ -148,9 +149,9 @@ class Episode:
 
         next_frame = self.trading_day[self.current_step:self.window_size +
                                       self.current_step]
-
+                                      
         self.current_frame = next_frame
-        
+
         agent_frame = pd.concat([
             next_frame,
             pd.Series(list(self.recent_actions), index=next_frame.index).rename('actions'),
@@ -158,6 +159,8 @@ class Episode:
             pd.Series(list(self.recent_upl), index=next_frame.index).rename('unrealized'),
             pd.Series(list(self.recent_pl), index=next_frame.index).rename('realized'),
         ], axis=1)
+        
+        agent_frame = process_for_agent(agent_frame)
 
         reward = self.reward_policy.calc_reward(self.account) # I need a better reward strategy, like positive PL = 1 negative pl = -1
         self.done = self.account.current_balance <= 0 or self.length - self.current_step == 0  # day / week is over or money is out
@@ -247,8 +250,7 @@ class Account:
 
 
 
-def process_day(day):
-    # --------------  Calculating Features ------------------
+def calculate_features(day):
     high = (day['ask_high'] + day['bid_high']) / 2
     high = high.rename('high')
     low = (day['ask_low'] + day['bid_low']) / 2
@@ -256,7 +258,7 @@ def process_day(day):
     close = (day['ask_close'] + day['bid_close']) / 2
     close = close.rename('close')
 
-    day_diff = day.diff().rename(columns = {
+    day_diff = day.copy().diff().rename(columns = {
         'ask_open': 'ask_open_diff',
         'bid_open': 'bid_open_diff',
         'ask_high': 'ask_high_diff',
@@ -273,16 +275,14 @@ def process_day(day):
     ema13 = ta.trend.ema_indicator(close, n=13, fillna=False).rename('ema13')
     ema35 = ta.trend.ema_indicator(close, n=35, fillna=False).rename('ema35')
     all_data = pd.concat([day, day_diff, ao, rsi, atr, ema13.diff(), ema35.diff()], axis=1)
-    enhanced_days.append(all_data)
-  
-    # -------------- Preprocessing -------------------------
     aligned_data = all_data.dropna()
-    internal_frame = aligned_data[['ask_high', 'bid_high',
-                                   'ask_low', 'bid_low',
-                                   'ask_close', 'bid_close']].copy()
+                                   
+    return aligned_data
 
+
+def process_for_agent(aligned_data):
     day_scaler = MinMaxScaler(feature_range=(-1, 1))
-    scaled_day = day_scaler.fit_transform(aligned_data[['ask_close','bid_close','ask_high','bid_high','ask_low','bid_low','ema13','ema35']].astype('float64'))
+    scaled_day = day_scaler.fit_transform(aligned_data[['ask_close_diff','bid_close_diff','ask_high_diff','bid_high_diff','ask_low_diff','bid_low_diff']].astype('float64'))
     #state = state.reshape((1, 32, 12))
   
     ao_scaler = MinMaxScaler(feature_range=(-1, 1))
@@ -293,6 +293,12 @@ def process_day(day):
 
     atr_scaler = MinMaxScaler(feature_range=(-1, 1))
     scaled_atr = atr_scaler.fit_transform(aligned_data['atr'].values.reshape(-1,1).astype('float64'))
-
-    external_frame = np.concatenate((scaled_day, scaled_ao, scaled_rsi, scaled_atr), axis=1)
-    return internal_frame, external_frame
+    
+    orders = aligned_data['orders'].values.reshape(-1,1).astype('float64') # is between -1 and 1
+    actions = aligned_data['actions'].values.reshape(-1,1).astype('float64') # is between -1 and 1
+    
+    unrealized_scaler = MinMaxScaler(feature_range=(-1, 1))
+    scaled_unrealized = unrealized_scaler.fit_transform(aligned_data['unrealized'].values.reshape(-1,1).astype('float64'))
+    
+    external_frame = np.concatenate((scaled_day, scaled_ao, scaled_rsi, scaled_atr, actions, orders, scaled_unrealized), axis=1)
+    return external_frame
