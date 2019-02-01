@@ -2,8 +2,7 @@ import arrow as time
 import numpy as np
 import pandas as pd
 from collections import deque
-from analysis.preprocessing import add_indicators, denoise_frame, scale_frame
-
+from . preprocessing import add_indicators, denoise_frame, scale_frame
 
 
 class DefaultRewardPolicy:
