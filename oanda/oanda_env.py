@@ -161,10 +161,11 @@ class Episode:
 
     def process_for_agent(self, data):
         raw_signals = ['ask_close','bid_close','ask_high','bid_high','ask_low','bid_low']
-        drop_signals = raw_signals + ['ask_open', 'bid_open']
+        drop_signals = raw_signals + ['ask_open', 'bid_open', 'ema13', 'ema35']
         window_smooth = denoise_frame(data[raw_signals])
         window_smooth = window_smooth.diff()
-        window_x = pd.concat([data, window_smooth], axis=1).drop(drop_signals, axis=1).dropna()
+        ema_diff = data[['ema13', 'ema35']].diff()
+        window_x = pd.concat([data, window_smooth, ema_diff], axis=1).drop(drop_signals, axis=1).dropna()
         agent_frame = pd.concat([
             window_x,
             pd.Series(list(self.recent_actions), index=window_x.index).rename('actions'),
@@ -211,7 +212,7 @@ class Order:
     def update(self, market_info):
         # TODO consider TP and SL
         self.profit_loss = self.calculate_pl(market_info)
-        diff = self.close_price(market_info) - self.order_price  # consider order type
+        diff = self.close_price(market_info) - self.order_price
         if diff >= self.take_profit:  # TODO this is quite dirty, cap at the actual sl and tp & also consider high and low
             # print("katsching!")
             return (self.profit_loss, True)
