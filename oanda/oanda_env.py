@@ -173,7 +173,7 @@ class Episode:
             pd.Series(list(self.recent_upl), index=window_x.index).rename('unrealized'),
             pd.Series(list(self.recent_pl), index=window_x.index).rename('realized'),
         ], axis=1)
-        window_x = scale_frame(window_x)
+        window_x = scale_frame(agent_frame)
         return window_x
 
     def buy(self):
