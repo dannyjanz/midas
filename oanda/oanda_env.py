@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd
 from sklearn.preprocessing import MinMaxScaler
 from collections import deque
+from oanda.preprocessing import add_indicators, denoise_frame, scale_frame
 import ta
 
 
@@ -97,7 +98,7 @@ class OandaEnv:
 
         days = self.api.load_period(instrument, granularity, start, end)
 
-        self.episodes = [calculate_features(episode) for episode in days]
+        self.episodes = [add_indicators(episode) for episode in days]
 
     def next_episode(self):
         episode = Episode(self.episodes[self.episode_index], self.window_size, self.reward_policy)
@@ -122,7 +123,7 @@ class Episode:
         self.actions = [0, 1, -1]
         self.action_functions = {1: self.buy, 0: self.hold, -1: self.sell}
         self.window_size = win_size
-        self.current_step = 0
+        self.current_step = 1
         self.trading_day = trading_data
         self.current_frame = self.trading_day[:self.window_size]
         self.account = Account(1000, 20)
@@ -147,24 +148,32 @@ class Episode:
         self.recent_upl.append(self.account.unrealized_pl)
         self.recent_pl.append(self.account.realized_pl)
 
-        next_frame = self.trading_day[self.current_step:self.window_size +
+        next_frame = self.trading_day[self.current_step -1:self.window_size +
                                       self.current_step]
                                       
         self.current_frame = next_frame
-
-        agent_frame = pd.concat([
-            next_frame,
-            pd.Series(list(self.recent_actions), index=next_frame.index).rename('actions'),
-            pd.Series(list(self.recent_orders), index=next_frame.index).rename('orders'),
-            pd.Series(list(self.recent_upl), index=next_frame.index).rename('unrealized'),
-            pd.Series(list(self.recent_pl), index=next_frame.index).rename('realized'),
-        ], axis=1)
         
-        agent_frame = process_for_agent(agent_frame)
+        agent_frame = self.process_for_agent(next_frame)
 
         reward = self.reward_policy.calc_reward(self.account) # I need a better reward strategy, like positive PL = 1 negative pl = -1
         self.done = self.account.current_balance <= 0 or self.length - self.current_step == 0  # day / week is over or money is out
         return (agent_frame, reward, self.done)
+
+    def process_for_agent(self, data):
+        raw_signals = ['ask_close','bid_close','ask_high','bid_high','ask_low','bid_low']
+        drop_signals = raw_signals + ['ask_open', 'bid_open']
+        window_smooth = denoise_frame(data[raw_signals])
+        window_smooth = window_smooth.diff()
+        window_x = pd.concat([data, window_smooth], axis=1).drop(drop_signals, axis=1).dropna()
+        agent_frame = pd.concat([
+            window_x,
+            pd.Series(list(self.recent_actions), index=window_x.index).rename('actions'),
+            pd.Series(list(self.recent_orders), index=window_x.index).rename('orders'),
+            pd.Series(list(self.recent_upl), index=window_x.index).rename('unrealized'),
+            pd.Series(list(self.recent_pl), index=window_x.index).rename('realized'),
+        ], axis=1)
+        window_x = scale_frame(window_x)
+        return window_x
 
     def buy(self):
         self.account.place_order(self.current_frame.tail(1), 1)
@@ -247,58 +256,3 @@ class Account:
                 self.current_order = None
             else:
                 self.unrealized_pl = profit_loss
-
-
-
-def calculate_features(day):
-    high = (day['ask_high'] + day['bid_high']) / 2
-    high = high.rename('high')
-    low = (day['ask_low'] + day['bid_low']) / 2
-    low = low.rename('low')
-    close = (day['ask_close'] + day['bid_close']) / 2
-    close = close.rename('close')
-
-    day_diff = day.copy().diff().rename(columns = {
-        'ask_open': 'ask_open_diff',
-        'bid_open': 'bid_open_diff',
-        'ask_high': 'ask_high_diff',
-        'bid_high': 'bid_high_diff',
-        'ask_low': 'ask_low_diff',
-        'bid_low': 'bid_low_diff',
-        'ask_close': 'ask_close_diff',
-        'bid_close': 'bid_close_diff'
-    })
-
-    ao = ta.momentum.ao(high, low, s=13, l=35, fillna=False).rename('ao')
-    rsi = ta.momentum.rsi(close, n=13, fillna=False).rename('rsi')
-    atr = ta.volatility.average_true_range(high, low, close, n=13, fillna=False).rename('atr')
-    ema13 = ta.trend.ema_indicator(close, n=13, fillna=False).rename('ema13')
-    ema35 = ta.trend.ema_indicator(close, n=35, fillna=False).rename('ema35')
-    all_data = pd.concat([day, day_diff, ao, rsi, atr, ema13.diff(), ema35.diff()], axis=1)
-    aligned_data = all_data.dropna()
-                                   
-    return aligned_data
-
-
-def process_for_agent(aligned_data):
-    day_scaler = MinMaxScaler(feature_range=(-1, 1))
-    scaled_day = day_scaler.fit_transform(aligned_data[['ask_close_diff','bid_close_diff','ask_high_diff','bid_high_diff','ask_low_diff','bid_low_diff']].astype('float64'))
-    #state = state.reshape((1, 32, 12))
-  
-    ao_scaler = MinMaxScaler(feature_range=(-1, 1))
-    scaled_ao = ao_scaler.fit_transform(aligned_data['ao'].values.reshape(-1,1).astype('float64'))
-  
-    rsi_scaler = MinMaxScaler(feature_range=(-1, 1))
-    scaled_rsi = rsi_scaler.fit_transform(aligned_data['rsi'].values.reshape(-1,1).astype('float64'))
-
-    atr_scaler = MinMaxScaler(feature_range=(-1, 1))
-    scaled_atr = atr_scaler.fit_transform(aligned_data['atr'].values.reshape(-1,1).astype('float64'))
-    
-    orders = aligned_data['orders'].values.reshape(-1,1).astype('float64') # is between -1 and 1
-    actions = aligned_data['actions'].values.reshape(-1,1).astype('float64') # is between -1 and 1
-    
-    unrealized_scaler = MinMaxScaler(feature_range=(-1, 1))
-    scaled_unrealized = unrealized_scaler.fit_transform(aligned_data['unrealized'].values.reshape(-1,1).astype('float64'))
-    
-    external_frame = np.concatenate((scaled_day, scaled_ao, scaled_rsi, scaled_atr, actions, orders, scaled_unrealized), axis=1)
-    return external_frame
