@@ -1,10 +1,9 @@
 import arrow as time
 import numpy as np
 import pandas as pd
-from sklearn.preprocessing import MinMaxScaler
 from collections import deque
-from oanda.preprocessing import add_indicators, denoise_frame, scale_frame
-import ta
+from analysis.preprocessing import add_indicators, denoise_frame, scale_frame
+
 
 
 class DefaultRewardPolicy:

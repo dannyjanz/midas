@@ -6,6 +6,11 @@ import pandas as pd
 import ta
 
 
+class Component:
+    def __init__(self, name):
+        pass
+        
+
 def denoise(data, wavelet='bior6.8', level=1, mode='smooth'):
     coeff = pywt.wavedec(data, wavelet, mode=mode)
     sigma = mad(coeff[-level])
