@@ -3,72 +3,7 @@ import numpy as np
 import pandas as pd
 from collections import deque
 from . preprocessing import add_indicators, denoise_frame, scale_frame
-
-
-class DefaultRewardPolicy:
-    def __init__(self):
-        pass
-    
-    def calc_reward(self, account):
-        reward = 0
-        pl_sum = account.realized_pl + account.unrealized_pl
-        
-        if pl_sum > 0:
-            reward = 1
-        elif pl_sum <= 0:
-            reward = -1
-        
-        return reward
-
-    
-class RealizedPLRewards:
-    def __init__(self):
-        pass
-
-    def calc_reward(self, account):
-        return account.realized_pl
-
-
-class UnRealizedPLRewards:
-    def __init__(self):
-        pass
-
-    def calc_reward(self, account):
-        return account.unrealized_pl
-
-
-class PLSumRewards:
-    def __init__(self):
-        pass
-
-    def calc_reward(self, account):
-        return account.unrealized_pl + account.realized_pl
-
-
-class FinishedTradeRewards:
-    def __init__(self):
-        self.order_last_turn = None
-
-    def calc_reward(self, account):
-        reward = 0
-        if self.order_last_turn is not None and account.current_order is None:
-            reward = self.order_last_turn.profit_loss
-
-        self.order_last_turn = account.current_order
-        return reward
-        
-
-class FinishedTradeAccountBalance:
-    def __init__(self):
-        self.order_last_turn = None
-
-    def calc_reward(self, account):
-        reward = 0
-        if self.order_last_turn is not None and account.current_order is None:
-            reward = account.current_balance
-
-        self.order_last_turn = account.current_order
-        return reward 
+from . rewards import FinishedTradeRewards
 
 
 class Same:
@@ -81,7 +16,7 @@ class Same:
 
 class OandaEnv:
     def __init__(self, api, window_size=32,
-                 reward_policy=FinishedTradeAccountBalance(),
+                 reward_policy=FinishedTradeRewards(),
                  episode_policy=Same, verbose=False):
 
         self.api = api
@@ -158,20 +93,29 @@ class Episode:
         return (agent_frame, reward, self.done)
 
     def process_for_agent(self, data):
-        raw_signals = ['ask_close','bid_close','ask_high','bid_high','ask_low','bid_low']
-        drop_signals = raw_signals + ['ask_open', 'bid_open', 'ema13', 'ema35']
+        state = {}
+        market_state = self.get_market_signal(data)
+        
+        state['market_state'] = scale_frame(market_state)
+        
+        env_state = pd.concat([
+            pd.Series(list(self.recent_actions), index=market_state.index).rename('actions'),
+            pd.Series(list(self.recent_orders), index=market_state.index).rename('orders'),
+            pd.Series(list(self.recent_upl), index=market_state.index).rename('unrealized'),
+            pd.Series(list(self.recent_pl), index=market_state.index).rename('realized'),
+        ], axis=1)
+        
+        state['env_state'] = scale_frame(env_state)
+        
+        return state
+        
+    def get_market_signal(self, data):
+        raw_signals = ['ask_close','bid_close','ask_high','bid_high','ask_low','bid_low','ask_open','bid_open']
+        drop_signals = raw_signals + ['ema13', 'ema35']
         window_smooth = denoise_frame(data[raw_signals])
         window_smooth = window_smooth.diff()
         ema_diff = data[['ema13', 'ema35']].diff()
         window_x = pd.concat([data, window_smooth, ema_diff], axis=1).drop(drop_signals, axis=1).dropna()
-        agent_frame = pd.concat([
-            window_x,
-            pd.Series(list(self.recent_actions), index=window_x.index).rename('actions'),
-            pd.Series(list(self.recent_orders), index=window_x.index).rename('orders'),
-            pd.Series(list(self.recent_upl), index=window_x.index).rename('unrealized'),
-            pd.Series(list(self.recent_pl), index=window_x.index).rename('realized'),
-        ], axis=1)
-        window_x = scale_frame(agent_frame)
         return window_x
 
     def buy(self):
