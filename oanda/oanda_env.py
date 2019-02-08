@@ -133,7 +133,19 @@ class Episode:
 
 class Order:
     def __init__(self, order_type, market_info):
-    
+        self.choose_functions(order_type)
+        self.order_type = order_type
+        self.order_price = self.close_price(market_info)
+        self.initial_spread = market_info['ask_close'].values[0] - market_info['bid_close'].values[0]
+        self.order_volume = 2000
+        self.stop_loss = 0.0005
+        self.take_profit = 0.0015
+        self.profit_loss = self.calculate_pl(market_info)
+        self.tp_dist = 0
+        self.sl_dist = 0
+        #print("order")
+        
+    def choose_functions(self, order_type):
         self.close_price_function = {
             1: lambda frame: frame['ask_close'].values[0],
             -1: lambda frame: frame['bid_close'].values[0]
@@ -151,14 +163,18 @@ class Order:
         self.high_price = self.high_price_function[order_type]
         self.low_price = self.low_price_function[order_type]
         
-        self.order_type = order_type
-        self.order_price = self.close_price(market_info)
-        self.initial_spread = market_info['ask_close'].values[0] - market_info['bid_close'].values[0]
-        self.order_volume = 2000
-        self.stop_loss = 0.0005
-        self.take_profit = 0.0015
-        self.profit_loss = self.calculate_pl(market_info)
-        #print("order")
+        tp_functions = {
+            1: lambda market: (self.close_price(market) - self.order_price) >= self.take_profit or (self.high_price(market) - self.order_price) >= self.take_profit,
+            -1: lambda market: - (self.close_price(market) - self.order_price) >= self.take_profit or - (self.low_price(market) - self.order_price) >= self.take_profit
+        }
+        
+        sl_functions = {
+            1: lambda market: - (self.close_price(market) - self.order_price) >= self.stop_loss or - (self.low_price(market) - self.order_price) >= self.stop_loss,
+            -1: lambda market: (self.close_price(market) - self.order_price) >= self.stop_loss or (self.high_price(market) - self.order_price) >= self.stop_loss
+        }
+        
+        self.hits_tp = tp_functions[order_type]
+        self.hits_sl = sl_functions[order_type]
 
     def calculate_pl(self, market_info):
         return (((self.close_price(market_info) - self.order_price) *
@@ -173,23 +189,11 @@ class Order:
                 
     def update(self, market_info):        
         # I should determine the distance if it doesnt hit.. and give it back to the bot
-        tp_functions = {
-            1: lambda market: (self.close_price(market) - self.order_price) >= self.take_profit or (self.high_price(market) - self.order_price) >= self.take_profit,
-            -1: lambda market: - (self.close_price(market) - self.order_price) >= self.take_profit or - (self.low_price(market) - self.order_price) >= self.take_profit
-        }
         
-        sl_functions = {
-            1: lambda market: - (self.close_price(market) - self.order_price) >= self.stop_loss or - (self.low_price(market) - self.order_price) >= self.stop_loss,
-            -1: lambda market: (self.close_price(market) - self.order_price) >= self.stop_loss or (self.high_price(market) - self.order_price) >= self.stop_loss
-        }
-        
-        hits_tp = tp_functions[self.order_type]
-        hits_sl = sl_functions[self.order_type]
-        
-        if hits_tp(market_info):
+        if self.hits_tp(market_info):
             self.profit_loss = self.calculate_tp(market_info)
             return (self.profit_loss, True)
-        elif hits_sl(market_info):
+        elif self.hits_sl(market_info):
             self.profit_loss = self.calculate_sl(market_info)
             return (self.profit_loss, True)
         else:
