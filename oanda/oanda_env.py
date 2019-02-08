@@ -133,11 +133,24 @@ class Episode:
 
 class Order:
     def __init__(self, order_type, market_info):
+    
         self.close_price_function = {
             1: lambda frame: frame['ask_close'].values[0],
             -1: lambda frame: frame['bid_close'].values[0]
         }
+        self.high_price_function = {
+            1: lambda frame: frame['ask_high'].values[0],
+            -1: lambda frame: frame['bid_high'].values[0]
+        }
+        self.low_price_function = {
+            1: lambda frame: frame['ask_low'].values[0],
+            -1: lambda frame: frame['bid_low'].values[0]
+        }
+  
         self.close_price = self.close_price_function[order_type]
+        self.high_price = self.high_price_function[order_type]
+        self.low_price = self.low_price_function[order_type]
+        
         self.order_type = order_type
         self.order_price = self.close_price(market_info)
         self.initial_spread = market_info['ask_close'].values[0] - market_info['bid_close'].values[0]
@@ -150,19 +163,37 @@ class Order:
     def calculate_pl(self, market_info):
         return (((self.close_price(market_info) - self.order_price) *
                 self.order_volume) * self.order_type) - self.initial_spread * self.order_volume
+                
 
-    def update(self, market_info):
-        # TODO consider TP and SL
-        self.profit_loss = self.calculate_pl(market_info)
-        diff = self.close_price(market_info) - self.order_price
-        if diff >= self.take_profit:  # TODO this is quite dirty, cap at the actual sl and tp & also consider high and low
-            # print("katsching!")
+    def calculate_tp(self, market_info):
+        return (self.take_profit * self.order_volume) - self.initial_spread * self.order_volume
+        
+    def calculate_sl(self, market_info):
+        return -(self.stop_loss * self.order_volume) - self.initial_spread * self.order_volume
+                
+    def update(self, market_info):        
+        # I should determine the distance if it doesnt hit.. and give it back to the bot
+        tp_functions = {
+            1: lambda market: (self.close_price(market) - self.order_price) >= self.take_profit or (self.high_price(market) - self.order_price) >= self.take_profit,
+            -1: lambda market: - (self.close_price(market) - self.order_price) >= self.take_profit or - (self.low_price(market) - self.order_price) >= self.take_profit
+        }
+        
+        sl_functions = {
+            1: lambda market: - (self.close_price(market) - self.order_price) >= self.stop_loss or - (self.low_price(market) - self.order_price) >= self.stop_loss,
+            -1: lambda market: (self.close_price(market) - self.order_price) >= self.stop_loss or (self.high_price(market) - self.order_price) >= self.stop_loss
+        }
+        
+        hits_tp = tp_functions[self.order_type]
+        hits_sl = sl_functions[self.order_type]
+        
+        if hits_tp(market_info):
+            self.profit_loss = self.calculate_tp(market_info)
             return (self.profit_loss, True)
-        elif -diff >= self.stop_loss:
-            # print("zonk!!!" + str(diff))
+        elif hits_sl(market_info):
+            self.profit_loss = self.calculate_sl(market_info)
             return (self.profit_loss, True)
         else:
-            # print("...")
+            self.profit_loss = self.calculate_pl(market_info)
             return (self.profit_loss, False)
 
 
@@ -173,7 +204,7 @@ class Account:
         self.realized_pl = 0
         self.unrealized_pl = 0
         self.current_order = None
-        # consider margin
+        # TODO consider margin
         # print("account")
 
     def place_order(self, market_info, order_type):
