@@ -22,16 +22,26 @@ class DataPrep:
       
             for j in range(1, len(signal) - window_size, step_size):
                 window_x = signal.iloc[j-1:j + window_size]
-                window_smooth = denoise_frame(window_x[raw_signals])
+                window_smooth = denoiser.denoise_frame(window_x[raw_signals])
                 window_smooth_diff = window_smooth.diff()
                 window_x = pd.concat([window_x, window_smooth_diff], axis=1)
-                window_x = window_x.drop(raw_signal, axis=1).dropna()
+                window_x = window_x.drop(raw_signals, axis=1).dropna()
         
-                window_x = scale_frame(window_x)
+                window_x = self.scale_frame(window_x)
                 data_x.append(window_x)
     
         data_x = np.array(data_x)
         return data_x
+        
+    def scale_frame(self, data):
+        scaler = MinMaxScaler(feature_range=(0, 1))
+        signals = []
+        for signal_name in data:
+            signal = data[signal_name].values
+            signal = signal.reshape(-1,1).astype('float64')
+            signal = scaler.fit_transform(signal)
+            signals.append(signal)
+        return np.concatenate(signals, axis=1)
         
     
         
@@ -48,11 +58,11 @@ class Denoiser:
         smoothed_signals.append(index)
         for signal_name in data:
             signal = data[signal_name].values
-            signal_smooth = denoise(signal)
-            signal_smooth = pd.Series(signal_smooth).rename(signal_name + '_' + wavelet)
+            signal_smooth = self.denoise(signal)
+            signal_smooth = pd.Series(signal_smooth).rename(signal_name + '_' + self.wavelet)
             smoothed_signals.append(signal_smooth)
         smoothed_frame = pd.concat(smoothed_signals, axis=1) 
-        smoothed_frame = smoothed_frame.set_index('time_of_day')
+        smoothed_frame = smoothed_frame.set_index(index_name)
         return smoothed_frame
     
     def denoise(self, data):
@@ -60,5 +70,5 @@ class Denoiser:
         sigma = mad(coeff[-self.level])
         uthresh = sigma * np.sqrt(2 * np.log(len(data)))
         coeff[1:] = (pywt.threshold(i, value=uthresh, mode="soft") for i in coeff[1:])
-        y = pywt.waverec(coeff, wavelet, mode=mode)
+        y = pywt.waverec(coeff, self.wavelet, mode=self.mode)
         return y
